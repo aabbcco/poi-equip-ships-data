@@ -1,0 +1,49 @@
+name: Sync Equipment Data
+on:
+  schedule:
+    - cron: '0 4 * * *'
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout akashi-list source
+        uses: actions/checkout@v4
+        with:
+          repository: yukikuri/akashi-list
+          ref: gh-pages
+          path: .tmp/source
+
+      - name: Checkout this repo (for extract script)
+        uses: actions/checkout@v4
+
+      - name: Extract equipment data
+        run: node scripts/extract.js .tmp/source .tmp/data/initial_equip_ships.json
+
+      - name: Generate index.json
+        run: |
+          EQUIP_COUNT=$(node -e "console.log(Object.keys(require('.tmp/data/initial_equip_ships.json')).length)")
+          SHIP_COUNT=$(node -e "
+            const d = require('.tmp/data/initial_equip_ships.json');
+            let total = 0;
+            Object.values(d).forEach(v => total += v.length);
+            console.log(total)
+          ")
+          printf '{"updated_at":"%s","equip_count":%s,"ship_entry_count":%s}\n' \
+            "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" \
+            "$EQUIP_COUNT" \
+            "$SHIP_COUNT" \
+            > .tmp/data/index.json
+
+      - name: Deploy to gh-pages
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: .tmp/data
+          publish_branch: gh-pages
+          force_orphan: true
+          commit_message: "sync: update equipment data [skip ci]"
