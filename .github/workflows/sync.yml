@@ -26,9 +26,9 @@ jobs:
 
       - name: Generate index.json
         run: |
-          EQUIP_COUNT=$(node -e "console.log(Object.keys(require('.tmp/data/initial_equip_ships.json')).length)")
+          EQUIP_COUNT=$(node -e "console.log(Object.keys(require('./.tmp/data/initial_equip_ships.json')).length)")
           SHIP_COUNT=$(node -e "
-            const d = require('.tmp/data/initial_equip_ships.json');
+            const d = require('./.tmp/data/initial_equip_ships.json');
             let total = 0;
             Object.values(d).forEach(v => total += v.length);
             console.log(total)
