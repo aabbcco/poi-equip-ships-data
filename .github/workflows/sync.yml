@@ -11,15 +11,15 @@ jobs:
       contents: write
 
     steps:
+      - name: Checkout this repo (for extract script)
+        uses: actions/checkout@v4
+
       - name: Checkout akashi-list source
         uses: actions/checkout@v4
         with:
           repository: yukikuri/akashi-list
           ref: gh-pages
           path: .tmp/source
-
-      - name: Checkout this repo (for extract script)
-        uses: actions/checkout@v4
 
       - name: Extract equipment data
         run: node scripts/extract.js .tmp/source .tmp/data/initial_equip_ships.json
