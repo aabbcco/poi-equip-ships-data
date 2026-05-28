@@ -22,7 +22,13 @@ jobs:
           path: .tmp/source
 
       - name: Extract equipment data
-        run: node scripts/extract.js .tmp/source .tmp/data/initial_equip_ships.json
+        run: |
+          node scripts/extract.js .tmp/source .tmp/data/initial_equip_ships.json
+          if [ ! -f .tmp/data/initial_equip_ships.json ]; then
+            echo "ERROR: extract failed to produce output file"
+            exit 1
+          fi
+          ls -lh .tmp/data/initial_equip_ships.json
 
       - name: Generate index.json
         run: |
