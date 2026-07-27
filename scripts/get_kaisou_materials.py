@@ -23,6 +23,8 @@ def parse_shippuupgrade(api_start2_path):
                 'report': item.get('api_report_count', 0),
                 'aviation': item.get('api_aviation_mat_count', 0),
                 'arms': item.get('api_arms_mat_count', 0),
+                'boiler': item.get('api_boiler_count', 0),
+                'tech': item.get('api_tech_count', 0),
             }
     return costs
 
@@ -50,71 +52,106 @@ def parse_ship_base(api_start2_path):
 
 
 def parse_hokoheso(main_js_path):
-    """Extract hokoheso costs from main.js."""
+    """Extract hokoheso (新型火炮兵装資材, id=75) costs from main.js getter.
+    
+    New obfuscated format:
+      Object[obf(0x465)](prototype, obf(0x317c), {
+        get: function() { switch(this[obf(0x328e)]) { case 0xNN: return 0xMM; ... } }
+      })
+    Switch is on mst_id_after (after ship ID), returns hokoheso count.
+    """
     result = {}
-    rex_func = re.compile(
-        r"Object\.defineProperty\(\w+\.prototype,\s*['\"]newhokohesosizai['\"],\s*\{\s*'?get'?\s*:\s*function\(\)\s*\{\s*switch\s*\(this\.mst_id_after\)\s*\{([^}]+(?:\{[^}]*\}[^}]*)*)\}",
-        re.M,
-    )
-    rex_item = re.compile(r'((?:case\s+\d+:\s*)+)return\s+(\d+);\s*')
-    rex_case = re.compile(r'case\s+(\d+):')
+    rex_case_ret = re.compile(r'((?:case\s+0x[\da-f]+:\s*)+)return\s+(0x[\da-f]+);\s*', re.I)
+    rex_case = re.compile(r'case\s+(0x[\da-f]+):', re.I)
 
     with open(main_js_path, 'r', encoding='utf8') as f:
         ctx = f.read()
-        match = rex_func.search(ctx)
-        if not match:
-            print('WARNING: hokoheso pattern not found in main.js')
-            return result
-        for m in rex_item.finditer(match.group(1)):
-            count = int(m.group(2))
-            for mc in rex_case.finditer(m.group(1)):
-                after_id = int(mc.group(1))
-                result[after_id] = count
+
+    # Find getter with (0x317c) and switch on this[obf(0x328e)]
+    rex_func = re.compile(
+        r'\w+\(0x317c\).*?switch\s*\(\s*this\[\w+\(0x328e\)\]\s*\)\s*\{((?:(?:case\s+0x[\da-f]+:\s*)+return\s+0x[\da-f]+;\s*)+)',
+        re.M | re.I,
+    )
+    match = rex_func.search(ctx)
+    if not match:
+        print('WARNING: hokoheso getter pattern not found in main.js')
+        return result
+
+    for m in rex_case_ret.finditer(match.group(1)):
+        count = int(m.group(2), 16)
+        for mc in rex_case.finditer(m.group(1)):
+            after_id = int(mc.group(1), 16)
+            result[after_id] = count
+
+    # Handle special case: case 0x38f (911): conditional on this[obf(0x2cb3)]
+    rex_special = re.compile(
+        r'case\s+(0x38f):\s*return\s+(0x[\da-f]+)\s*==\s*this\[\w+\(0x2cb3\)\)\]\s*\?\s*(0x[\da-f]+)\s*:\s*(0x[\da-f]+)',
+        re.I,
+    )
+    special = rex_special.search(ctx)
+    if special:
+        after_id = int(special.group(1), 16)
+        cmp_val = int(special.group(2), 16)
+        true_val = int(special.group(3), 16)
+        false_val = int(special.group(4), 16)
+        result[after_id] = true_val  # default to true_val, could be refined
+
     return result
 
 
 def parse_devkit_buildkit(main_js_path):
-    """Extract devkit and buildkit costs from main.js."""
+    """Extract devkit and buildkit costs from main.js (obfuscated format).
+    
+    New main.js uses computed property access instead of named functions:
+      prototype[obf(0xcc7)] = function(id, drawing, steel) { switch(id) {...} }
+      prototype[obf(0xad9)] = function(id) { switch(id) {...} }
+    """
     devkit = {}
     buildkit = {}
     use_devkit_group = []
 
+    rex_case_ret = re.compile(r'((?:case\s+0x[\da-f]+:\s*)+)return\s+(0x[\da-f]+);\s*', re.I)
+    rex_case = re.compile(r'case\s+(0x[\da-f]+):', re.I)
+
     with open(main_js_path, 'r', encoding='utf8') as f:
         ctx = f.read()
 
-    # getRequiredDevkitNum
-    rex_devkit = re.compile(
-        r'\.prototype\._getRequiredDevkitNum\s*=\s*function\([^)]*\)\s*\{\s*switch\s*\([^)]+\)\s*\{((?:(?:case\s+\d+:\s*)+return\s+\d+;\s*)+)',
-        re.M,
-    )
-    # getRequiredBuildKitNum
+    # buildkit: (0xad9)]=function(shipId){switch(shipId){...}}
     rex_buildkit = re.compile(
-        r'\.prototype\._getRequiredBuildKitNum\s*=\s*function\([^)]*\)\s*\{\s*switch\s*\([^)]+\)\s*\{((?:(?:case\s+\d+:\s*)+return\s+\d+;\s*)+)',
-        re.M,
+        r'\(0xad9\)\]\s*=\s*function\s*\(\s*(\w+)\s*\)\s*\{\s*switch\s*\(\s*\1\s*\)\s*\{((?:(?:case\s+0x[\da-f]+:\s*)+return\s+0x[\da-f]+;\s*)+)',
+        re.M | re.I,
     )
-
-    rex_case_ret = re.compile(r'((?:case\s+\d+:\s*)+)return\s+(\d+);\s*')
-    rex_case = re.compile(r'case\s+(\d+):')
-
-    def extract(rex):
-        match = rex.search(ctx)
-        if not match:
-            return {}
-        result = {}
-        for m in rex_case_ret.finditer(match.group(1)):
-            value = int(m.group(2))
+    match = rex_buildkit.search(ctx)
+    if match:
+        for m in rex_case_ret.finditer(match.group(2)):
+            value = int(m.group(2), 16)
             for mc in rex_case.finditer(m.group(1)):
-                result[int(mc.group(1))] = value
-        return result
+                buildkit[int(mc.group(1), 16)] = value
 
-    devkit = extract(rex_devkit)
-    buildkit = extract(rex_buildkit)
+    # devkit: (0xcc7)]=function(id,drawing,steel){...switch(id){...}}
+    rex_devkit = re.compile(
+        r'\(0xcc7\)\]\s*=\s*function\s*\([^)]+\)\s*\{.+?switch\s*\(\s*(\w+)\s*\)\s*\{((?:(?:case\s+0x[\da-f]+:\s*)+return\s+0x[\da-f]+;\s*)+)',
+        re.M | re.I,
+    )
+    match = rex_devkit.search(ctx)
+    if match:
+        for m in rex_case_ret.finditer(match.group(2)):
+            value = int(m.group(2), 16)
+            for mc in rex_case.finditer(m.group(1)):
+                devkit[int(mc.group(1), 16)] = value
 
-    # USE_DEVKIT_GROUP
-    rex_group = re.compile(r'this\._USE_DEVKIT_GROUP_\s*=\s*\[([^\]]+)\]', re.M)
+    # USE_DEVKIT_GROUP: constructor pattern this[obf(0x494)]=[0xNN,0xNN]
+    rex_group = re.compile(
+        r'this\[\w+\(0x494\)\]\s*=\s*\[((?:0x[\da-f]+\s*,\s*)*0x[\da-f]+)\]',
+        re.I,
+    )
     match = rex_group.search(ctx)
     if match:
-        use_devkit_group = [int(m.group()) for m in re.finditer(r'\d+', match.group(1))]
+        use_devkit_group = [int(n.group(), 16) for n in re.finditer(r'0x([\da-f]+)', match.group(1), re.I)]
+
+    print(f'  Buildkit switch entries: {len(buildkit)}')
+    print(f'  Devkit switch entries: {len(devkit)}')
+    print(f'  USE_DEVKIT_GROUP: {use_devkit_group}')
 
     return devkit, buildkit, use_devkit_group
 
@@ -155,6 +192,8 @@ def main():
         'aviation': 77,
         'hokoheso': 75,
         'arms': 94,
+        'boiler': 899,
+        'tech': 100,
     }
 
     kaisou_materials = {}
@@ -188,6 +227,8 @@ def main():
             'aviation': cost.get('aviation', 0),
             'hokoheso': hokoheso_count,
             'arms': cost.get('arms', 0),
+            'boiler': cost.get('boiler', 0),
+            'tech': cost.get('tech', 0),
         }
 
         consumable = []
