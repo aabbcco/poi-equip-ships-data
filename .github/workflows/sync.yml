@@ -14,6 +14,16 @@ jobs:
       - name: Checkout this repo (for extract script)
         uses: actions/checkout@v4
 
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
       - name: Checkout akashi-list source
         uses: actions/checkout@v4
         with:
@@ -30,6 +40,21 @@ jobs:
           fi
           ls -lh .tmp/data/initial_equip_ships.json
 
+      - name: Download api_start2.json
+        run: curl -sSL -o .tmp/start2/api_start2.json https://api.kcwiki.moe/start2
+
+      - name: Download main.js
+        run: curl -sSL -o .tmp/start2/main.js https://raw.githubusercontent.com/kcwikizh/kancolle-main/master/dist/main.js
+
+      - name: Generate kaisou_materials.json
+        run: |
+          python3 scripts/get_kaisou_materials.py .tmp/start2/api_start2.json .tmp/start2/main.js .tmp/data/kaisou_materials.json
+          if [ ! -f .tmp/data/kaisou_materials.json ]; then
+            echo "ERROR: generate kaisou_materials failed"
+            exit 1
+          fi
+          ls -lh .tmp/data/kaisou_materials.json
+
       - name: Generate index.json
         run: |
           EQUIP_COUNT=$(node -e "console.log(Object.keys(require('./.tmp/data/initial_equip_ships.json')).length)")
@@ -39,10 +64,12 @@ jobs:
             Object.values(d).forEach(v => total += v.length);
             console.log(total)
           ")
-          printf '{"updated_at":"%s","equip_count":%s,"ship_entry_count":%s}\n' \
+          KAISOU_COUNT=$(node -e "console.log(Object.keys(require('./.tmp/data/kaisou_materials.json')).length)")
+          printf '{"updated_at":"%s","equip_count":%s,"ship_entry_count":%s,"kaisou_count":%s}\n' \
             "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" \
             "$EQUIP_COUNT" \
             "$SHIP_COUNT" \
+            "$KAISOU_COUNT" \
             > .tmp/data/index.json
 
       - name: Deploy to gh-pages
